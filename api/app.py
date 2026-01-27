@@ -44,6 +44,18 @@ def extract_va(text, keyword):
 
     return "\n".join(result)
 
+def split_phones(phone_str, index):
+    if pd.isna(phone_str):
+        return ""
+    parts = [p.strip() for p in str(phone_str).split(";")]
+    return parts[index] if index < len(parts) else ""
+
+def split_refs(text, index):
+    if pd.isna(text):
+        return ""
+    parts = [p.strip() for p in str(text).split(";")]
+    return parts[index] if index < len(parts) else ""
+
 
 def extract_amount(detail_str, cli_code):
     if pd.isna(detail_str) or pd.isna(cli_code):
@@ -53,6 +65,19 @@ def extract_amount(detail_str, cli_code):
     match = re.search(pattern, str(detail_str))
     return int(match.group(1)) if match else 0
 
+def extract_va_multi(row, columns, keyword):
+    result = []
+
+    for col in columns:
+        val = row.get(col)
+        if pd.notna(val):
+            lines = str(val).split(";")
+            for l in lines:
+                if keyword.upper() in l.upper():
+                    result.append(l.strip() + ";")
+
+    return "\n".join(result)
+
 
 def process_data(df):
 
@@ -60,7 +85,18 @@ def process_data(df):
         {"cli_col": "CLI_indodana_2_contain_adt", "product_col": "product_CLI_indodana_2_adt"},
         {"cli_col": "CLI_blibli_3_contain_adt", "product_col": "product_CLI_blibli_3_adt"},
         {"cli_col": "CLI_tiket_4_contain_adt", "product_col": "product_CLI_tiket_4_adt"},
+        {"cli_col": "CLI_indodana_2_contain_imf", "product_col": "product_CLI_indodana_2_imf"},
         {"cli_col": "CLI_blibli_3_contain_imf", "product_col": "product_CLI_blibli_3_imf"},
+        {"cli_col": "CLI_tiket_4_contain_imf", "product_col": "product_CLI_tiket_4_imf"},
+    ]
+
+    va_sources = [
+    "va_number_adt_indodana",
+    "va_number_adt_blibli",
+    "va_number_adt_tiket",
+    "va_number_imf_indodana",
+    "va_number_imf_blibli",
+    "va_number_imf_tiket",
     ]
 
     rows = []
@@ -97,24 +133,33 @@ def process_data(df):
                     "latefee": extract_amount(r["latefee_detail"], cli_val),
                     "total_outstanding": extract_amount(r["total_outstanding_detail"], cli_val),
 
-                    "VA_BCA": extract_va(r["va_number_adt_indodana"], "BCA"),
-                    "VA_BLIBLI": extract_va(r["va_number_adt_indodana"], "BLIBLI"),
-                    "VA_BNI": extract_va(r["va_number_adt_indodana"], "BNI"),
-                    "VA_DANAMON": extract_va(r["va_number_adt_indodana"], "DANAMON"),
-                    "VA_LINKAJA": extract_va(r["va_number_adt_indodana"], "LINKAJA"),
-                    "VA_MANDIRI": extract_va(r["va_number_adt_indodana"], "MANDIRI"),
-                    "VA_PERMATA": extract_va(r["va_number_adt_indodana"], "PERMATA"),
+                    # ===== VA SPLIT =====
+                    "VA_BCA": extract_va_multi(r, va_sources, "BCA"),
+                    "VA_BLIBLI": extract_va_multi(r, va_sources, "BLIBLI"),
+                    "VA_BNI": extract_va_multi(r, va_sources, "BNI"),
+                    "VA_DANAMON": extract_va_multi(r, va_sources, "DANAMON"),
+                    "VA_LINKAJA": extract_va_multi(r, va_sources, "LINKAJA"),
+                    "VA_MANDIRI": extract_va_multi(r, va_sources, "MANDIRI"),
+                    "VA_PERMATA": extract_va_multi(r, va_sources, "PERMATA"),
+
 
                     "payments_history_cli_indodana_2": r["payments_history_cli_indodana_2"],
                     "payments_history_cli_blibli_3": r["payments_history_cli_blibli_3"],
                     "payments_history_cli_tiket_4": r["payments_history_cli_tiket_4"],
-                    "PhoneNumber": r["PhoneNumber"],
+                    "PhoneNumber_1": split_phones(r["PhoneNumber"], 0),
+                    "PhoneNumber_2": split_phones(r["PhoneNumber"], 1),
+                    "PhoneNumber_3": split_phones(r["PhoneNumber"], 2),
+                    "PhoneNumber_4": split_phones(r["PhoneNumber"], 3),
                     "applicantHomePhoneNumber": r["applicantHomePhoneNumber"],
                     "jobTitle": r["jobTitle"],
                     "current_company_name": r["current_company_name"],
                     "currentCompanyPhoneNumber": r["currentCompanyPhoneNumber"],
-                    "referenceFullName": r["referenceFullName"],
-                    "referenceRelationship": r["referenceRelationship"],
+                    "referenceFullName_1": split_refs(r["referenceFullName"], 0),
+                    "referenceFullName_2": split_refs(r["referenceFullName"], 1),
+                    "referenceFullName_3": split_refs(r["referenceFullName"], 2),
+                    "referenceRelationship_1": split_refs(r["referenceRelationship"], 0),
+                    "referenceRelationship_2": split_refs(r["referenceRelationship"], 1),
+                    "referenceRelationship_3": split_refs(r["referenceRelationship"], 2), 
                     "referenceHomePhoneNumber": r["referenceHomePhoneNumber"],
                     "referenceMobilePhoneNumber": r["referenceMobilePhoneNumber"],
                     "broken_promise": r["broken_promise"],
