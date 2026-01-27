@@ -6,7 +6,7 @@ from io import BytesIO
 # ==============================
 # 🔐 LOGIN SYSTEM
 # ==============================
-USER_CREDENTIALS = {"admin": "akbar123"}
+USER_CREDENTIALS = {"admin": "admin123"}
 
 if "login_status" not in st.session_state:
     st.session_state.login_status = False
@@ -220,3 +220,4 @@ else:
 
 st.markdown("---")
 st.markdown("© 2026 - Muhamad Akbar")
+
