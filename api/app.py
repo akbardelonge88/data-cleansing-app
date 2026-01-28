@@ -125,7 +125,7 @@ def process_data(df):
                     "DATE_OF_BIRTH": r["dob"],
                     "MOBILE_NO_2": str(split_phones(r["PhoneNumber"], 1)).lstrip("0"),
                     "EMAIL": r["applicantPersonalEmail"],
-                    "PRODUCT": str(["cli_col"].split("_")[-1]).upper(),
+                    "PRODUCT": m["cli_col"].split("_")[-1].upper(),
                     "TENOR": r["tenure"],
                     "SUB_PRODUCT": m["cli_col"],
                     "RENTAL": r["angsuran_per_bulan"],
