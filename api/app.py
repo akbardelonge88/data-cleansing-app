@@ -31,18 +31,94 @@ def logout():
 # ==============================
 # 🧠 HELPER FUNCTIONS
 # ==============================
-def extract_va(text, keyword):
-    if pd.isna(text):
-        return ""
 
-    lines = str(text).split(";")
+def extract_trx_from_collateral(collateral_text):
+    if pd.isna(collateral_text):
+        return []
+    return re.findall(r"TRX-[A-Z0-9]+", str(collateral_text))
+
+
+def extract_payments_filtered(payment_text, trx_list):
+    if pd.isna(payment_text) or payment_text.strip() == "":
+        return pd.DataFrame()
+
+    pattern = r"(TRX-[A-Z0-9]+).*?Date ([0-9\-]+), Amount ([0-9]+)"
+    matches = re.findall(pattern, payment_text)
+
+    rows = []
+    for trx, date, amount in matches:
+        if trx in trx_list:
+            rows.append([trx, pd.to_datetime(date), int(amount)])
+
+    if not rows:
+        return pd.DataFrame()
+
+    dfp = pd.DataFrame(rows, columns=["trx", "date", "amount"])
+    dfp = dfp.groupby(["trx", "date"], as_index=False)["amount"].sum()
+    dfp = dfp.sort_values("date", ascending=False).reset_index(drop=True)
+    return dfp
+
+
+def get_last_3_payments(payment_text, collateral_text):
+    trx_list = extract_trx_from_collateral(collateral_text)
+    dfp = extract_payments_filtered(payment_text, trx_list)
+
+    results = {
+        "Last_Payment_Date": "",
+        "Last_Payment_Amount": "",
+        "2nd_Last_Payment_Date": "",
+        "2nd_Last_Payment_Amount": "",
+        "3rd_Last_Payment_Date": "",
+        "3rd_Last_Payment_Amount": "",
+    }
+
+    for i in range(min(3, len(dfp))):
+        date_str = dfp.loc[i, "date"].strftime("%Y-%m-%d")
+        amt_str = f"{dfp.loc[i, 'amount']:,}"
+
+        if i == 0:
+            results["Last_Payment_Date"] = date_str
+            results["Last_Payment_Amount"] = amt_str
+        elif i == 1:
+            results["2nd_Last_Payment_Date"] = date_str
+            results["2nd_Last_Payment_Amount"] = amt_str
+        elif i == 2:
+            results["3rd_Last_Payment_Date"] = date_str
+            results["3rd_Last_Payment_Amount"] = amt_str
+
+    return results
+
+
+def payment_column_from_subproduct(sub_product):
+    sp = sub_product.lower()
+    if "indodana" in sp:
+        return "payments_history_cli_indodana_2"
+    elif "blibli" in sp:
+        return "payments_history_cli_blibli_3"
+    elif "tiket" in sp:
+        return "payments_history_cli_tiket_4"
+    return None
+
+
+def extract_amount(detail_str, cli_code):
+    if pd.isna(detail_str) or pd.isna(cli_code):
+        return 0
+    pattern = rf"{re.escape(str(cli_code))}=([\d]+)"
+    match = re.search(pattern, str(detail_str))
+    return int(match.group(1)) if match else 0
+
+
+def extract_va_multi(row, columns, keyword):
     result = []
-
-    for l in lines:
-        if keyword.upper() in l.upper():
-            result.append(l.strip() + ";")
-
+    for col in columns:
+        val = row.get(col)
+        if pd.notna(val):
+            lines = str(val).split(";")
+            for l in lines:
+                if keyword.upper() in l.upper():
+                    result.append(l.strip() + ";")
     return "\n".join(result)
+
 
 def split_phones(phone_str, index):
     if pd.isna(phone_str):
@@ -57,28 +133,9 @@ def split_refs(text, index):
     return parts[index] if index < len(parts) else ""
 
 
-def extract_amount(detail_str, cli_code):
-    if pd.isna(detail_str) or pd.isna(cli_code):
-        return 0
-
-    pattern = rf"{re.escape(str(cli_code))}=([\d]+)"
-    match = re.search(pattern, str(detail_str))
-    return int(match.group(1)) if match else 0
-
-def extract_va_multi(row, columns, keyword):
-    result = []
-
-    for col in columns:
-        val = row.get(col)
-        if pd.notna(val):
-            lines = str(val).split(";")
-            for l in lines:
-                if keyword.upper() in l.upper():
-                    result.append(l.strip() + ";")
-
-    return "\n".join(result)
-
-
+# ==============================
+# ⚙️ PROCESS DATA
+# ==============================
 def process_data(df):
 
     cli_map = [
@@ -91,12 +148,8 @@ def process_data(df):
     ]
 
     va_sources = [
-    "va_number_adt_indodana",
-    "va_number_adt_blibli",
-    "va_number_adt_tiket",
-    "va_number_imf_indodana",
-    "va_number_imf_blibli",
-    "va_number_imf_tiket",
+        "va_number_adt_indodana","va_number_adt_blibli","va_number_adt_tiket",
+        "va_number_imf_indodana","va_number_imf_blibli","va_number_imf_tiket",
     ]
 
     rows = []
@@ -108,65 +161,37 @@ def process_data(df):
 
             if pd.notna(cli_val) and str(cli_val).strip() != "":
 
+                payment_col = payment_column_from_subproduct(m["cli_col"])
+                payments = get_last_3_payments(r.get(payment_col, ""), product_val)
+
                 new_row = {
                     "CLIENT_NAME": "INDODANA MULTI FINANCE",
                     "CLIENT_CODE": "CLI00057",
                     "ASSIGNMENT_DATE": r["start_date"],
-                    "ASSIGNED_TO": None,
                     "BATCH": r["batch_import"],
                     "CUSTOMER_ID": cli_val,
-                    "ADDRESS": None,
                     "AGREEMENT_NO": r["orderId_DC"],
-                    "CITY": None,
                     "CUSTOMER_NAME": str(r["name"]).upper(),
-                    "PROVINCE": None, 
                     "GENDER": r["applicantGender"],
                     "MOBILE_NO": str(split_phones(r["PhoneNumber"], 0)).lstrip("0"),
-                    "DATE_OF_BIRTH": r["dob"],
                     "MOBILE_NO_2": str(split_phones(r["PhoneNumber"], 1)).lstrip("0"),
                     "EMAIL": r["applicantPersonalEmail"],
                     "PRODUCT": m["cli_col"].split("_")[-1].upper(),
                     "TENOR": r["tenure"],
                     "SUB_PRODUCT": m["cli_col"],
                     "RENTAL": r["angsuran_per_bulan"],
-                    "DISBURSE_DATE": None, 
                     "OVD_DAYS": r["max_current_dpd"],
                     "LOAN_AMOUNT": extract_amount(r["total_hutang_detail"], cli_val),
-                    "BUCKET": None,
-                    "DUEDATE": r["tgl_jatuh_tempo"],
-                    "AMOUNT_OVERDUE": None,
                     "OS_PRINCIPAL": extract_amount(r["pokok_tertunggak_detail"], cli_val),
-                    "LAST_PAYMENT_DATE": None,
-                    "OS_INTEREST": None,
-                    "LAST_PAYMENT_AMOUNT": None,
                     "OS_CHARGES": extract_amount(r["latefee_detail"], cli_val),
-                    "PAID_OFF_WITH_DISCOUNT": None,
                     "TOTAL_OUTSTANDING": extract_amount(r["total_outstanding_detail"], cli_val),
-                    "FLAG_DISCOUNT": None,
                     "BCA_VA": extract_va_multi(r, va_sources, "BCA"),
-                    "INDOMARET": None,
                     "MANDIRI_VA": extract_va_multi(r, va_sources, "MANDIRI"),
-                    "ALFAMART": None,
-                    "BRI_VA": None,
-                    "PERMATA_VA":extract_va_multi(r, va_sources, "PERMATA"),
-                    "COMPANY_NAME":r["current_company_name"],
-                    "ADDRESS_COMPANY": None, 
+                    "PERMATA_VA": extract_va_multi(r, va_sources, "PERMATA"),
+                    "COMPANY_NAME": r["current_company_name"],
                     "POSITION": r["jobTitle"],
-                    "OFFICE_PHONE_NO": r["currentCompanyPhoneNumber"],
-                    "EMERGENCY_NAME_1": r["mothername"],
-                    "EMERGENCY_NAME_2": split_refs(r["referenceFullName"], 0),
-                    "EMERGENCY_RELATIONSHIP_1": "Ibu Kandung",
-                    "EMERGENCY_RELATIONSHIP_2": split_refs(r["referenceRelationship"], 0),
-                    "EMERGENCY_PHONE_NO_1": None,
-                    "EMERGENCY_PHONE_NO_2": r["referenceMobilePhoneNumber"],
-                    "EMERGENCY_ADDRESS_1": None,
-                    "EMERGENCY_ADDRESS_2": None,
-                    "REMARKS 1": None,
-                    "REMARKS 2": None,
-                    "REMARKS 3": None,
                     "COLLATERAL_DESCRIPTION": product_val,
-                    "CERTIFICATE_NO / POLICE_NO": None,
-                    "AGENT": None,
+                    **payments
                 }
 
                 rows.append(new_row)
