@@ -27,6 +27,7 @@ def login():
 def logout():
     for k in list(st.session_state.keys()):
         del st.session_state[k]
+    st.rerun()
 
 # ==============================
 # 🧠 HELPER FUNCTIONS
@@ -34,26 +35,33 @@ def logout():
 def split_phones(text, idx):
     if pd.isna(text):
         return ""
-    parts = [p.strip() for p in str(text).split(";")]
-    return parts[idx] if idx < len(parts) else ""
+    arr = [x.strip() for x in str(text).split(";")]
+    return arr[idx] if idx < len(arr) else ""
+
+def split_refs(text, idx):
+    if pd.isna(text):
+        return ""
+    arr = [x.strip() for x in str(text).split(";")]
+    return arr[idx] if idx < len(arr) else ""
 
 def extract_amount(detail, cli):
     if pd.isna(detail) or pd.isna(cli):
         return 0
-    m = re.search(rf"{re.escape(cli)}=([\d]+)", str(detail))
+    m = re.search(rf"{re.escape(str(cli))}=([\d]+)", str(detail))
     return int(m.group(1)) if m else 0
 
 def extract_va_multi(row, cols, keyword):
     res = []
     for c in cols:
-        if pd.notna(row.get(c)):
-            for l in str(row[c]).split(";"):
-                if keyword.upper() in l.upper():
-                    res.append(l.strip() + ";")
+        v = row.get(c)
+        if pd.notna(v):
+            for x in str(v).split(";"):
+                if keyword.upper() in x.upper():
+                    res.append(x.strip() + ";")
     return "\n".join(res)
 
 # ==============================
-# 💰 PAYMENT FUNCTIONS
+# 💳 PAYMENT PARSER
 # ==============================
 def extract_payments(payment_text):
     if pd.isna(payment_text) or payment_text.strip() == "":
@@ -62,29 +70,31 @@ def extract_payments(payment_text):
     pattern = r"(TRX-[A-Z0-9]+).*?Date ([0-9\-]+), Amount ([0-9]+)"
     matches = re.findall(pattern, payment_text)
 
-    dfp = pd.DataFrame(matches, columns=["trx", "date", "amount"])
-    if dfp.empty:
-        return dfp
+    rows = []
+    for trx, date, amt in matches:
+        rows.append([trx, pd.to_datetime(date), int(amt)])
 
-    dfp["date"] = pd.to_datetime(dfp["date"])
-    dfp["amount"] = dfp["amount"].astype(int)
+    if not rows:
+        return pd.DataFrame()
 
-    # trx sama + tanggal sama → dijumlah
+    dfp = pd.DataFrame(rows, columns=["trx", "date", "amount"])
+
+    # ⚠️ RULE:
+    # hanya dijumlahkan kalau TRX & DATE sama
     dfp = dfp.groupby(["trx", "date"], as_index=False)["amount"].sum()
-    dfp = dfp.sort_values("date", ascending=False)
-
-    return dfp.reset_index(drop=True)
+    dfp = dfp.sort_values("date", ascending=False).reset_index(drop=True)
+    return dfp
 
 def get_last_3_payments(payment_text):
     dfp = extract_payments(payment_text)
 
-    cols = {
-        "LAST_PAYMENT_DATE": "",
-        "LAST_PAYMENT_AMOUNT": "",
-        "2ND_LAST_PAYMENT_DATE": "",
-        "2ND_LAST_PAYMENT_AMOUNT": "",
-        "3RD_LAST_PAYMENT_DATE": "",
-        "3RD_LAST_PAYMENT_AMOUNT": "",
+    out = {
+        "Last_Payment_Date": "",
+        "Last_Payment_Amount": "",
+        "2nd_Last_Payment_Date": "",
+        "2nd_Last_Payment_Amount": "",
+        "3rd_Last_Payment_Date": "",
+        "3rd_Last_Payment_Amount": "",
     }
 
     for i in range(min(3, len(dfp))):
@@ -92,42 +102,42 @@ def get_last_3_payments(payment_text):
         a = f"{dfp.loc[i, 'amount']:,}"
 
         if i == 0:
-            cols["LAST_PAYMENT_DATE"] = d
-            cols["LAST_PAYMENT_AMOUNT"] = a
+            out["Last_Payment_Date"] = d
+            out["Last_Payment_Amount"] = a
         elif i == 1:
-            cols["2ND_LAST_PAYMENT_DATE"] = d
-            cols["2ND_LAST_PAYMENT_AMOUNT"] = a
+            out["2nd_Last_Payment_Date"] = d
+            out["2nd_Last_Payment_Amount"] = a
         elif i == 2:
-            cols["3RD_LAST_PAYMENT_DATE"] = d
-            cols["3RD_LAST_PAYMENT_AMOUNT"] = a
+            out["3rd_Last_Payment_Date"] = d
+            out["3rd_Last_Payment_Amount"] = a
 
-    return cols
+    return out
 
-def payment_column_from_subproduct(sub_product):
-    s = sub_product.lower()
-    if "indodana" in s:
+def payment_col_from_subproduct(sub_product):
+    sp = sub_product.lower()
+    if "indodana" in sp:
         return "payments_history_cli_indodana_2"
-    if "blibli" in s:
+    if "blibli" in sp:
         return "payments_history_cli_blibli_3"
-    if "tiket" in s:
+    if "tiket" in sp:
         return "payments_history_cli_tiket_4"
     return None
 
 # ==============================
-# 🚀 MAIN PROCESS
+# 🧠 MAIN PROCESS
 # ==============================
 def process_data(df):
 
     cli_map = [
-        ("CLI_indodana_2_contain_adt", "ADT"),
-        ("CLI_blibli_3_contain_adt", "ADT"),
-        ("CLI_tiket_4_contain_adt", "ADT"),
-        ("CLI_indodana_2_contain_imf", "IMF"),
-        ("CLI_blibli_3_contain_imf", "IMF"),
-        ("CLI_tiket_4_contain_imf", "IMF"),
+        {"cli": "CLI_indodana_2_contain_adt", "prod": "product_CLI_indodana_2_adt"},
+        {"cli": "CLI_blibli_3_contain_adt", "prod": "product_CLI_blibli_3_adt"},
+        {"cli": "CLI_tiket_4_contain_adt", "prod": "product_CLI_tiket_4_adt"},
+        {"cli": "CLI_indodana_2_contain_imf", "prod": "product_CLI_indodana_2_imf"},
+        {"cli": "CLI_blibli_3_contain_imf", "prod": "product_CLI_blibli_3_imf"},
+        {"cli": "CLI_tiket_4_contain_imf", "prod": "product_CLI_tiket_4_imf"},
     ]
 
-    va_cols = [
+    va_sources = [
         "va_number_adt_indodana","va_number_adt_blibli","va_number_adt_tiket",
         "va_number_imf_indodana","va_number_imf_blibli","va_number_imf_tiket"
     ]
@@ -135,54 +145,64 @@ def process_data(df):
     rows = []
 
     for _, r in df.iterrows():
-        for cli_col, prod in cli_map:
-            cli = r.get(cli_col)
-            if pd.isna(cli) or str(cli).strip() == "":
+        for m in cli_map:
+            cli_val = r.get(m["cli"])
+            if pd.isna(cli_val) or str(cli_val).strip() == "":
                 continue
 
-            pay_col = payment_column_from_subproduct(cli_col)
-            payment_info = get_last_3_payments(r.get(pay_col, ""))
+            pay_col = payment_col_from_subproduct(m["cli"])
+            payment_info = get_last_3_payments(r.get(pay_col)) if pay_col else {}
 
-            rows.append({
-                "CUSTOMER_ID": cli,
+            row = {
+                "CUSTOMER_ID": cli_val,
                 "AGREEMENT_NO": r["orderId_DC"],
-                "PRODUCT": prod,
-                "SUB_PRODUCT": cli_col,
-                "LOAN_AMOUNT": extract_amount(r["total_hutang_detail"], cli),
-                "OS_PRINCIPAL": extract_amount(r["pokok_tertunggak_detail"], cli),
-                "OS_CHARGES": extract_amount(r["latefee_detail"], cli),
-                "TOTAL_OUTSTANDING": extract_amount(r["total_outstanding_detail"], cli),
-                "BCA_VA": extract_va_multi(r, va_cols, "BCA"),
-                "MANDIRI_VA": extract_va_multi(r, va_cols, "MANDIRI"),
+                "PRODUCT": m["cli"].split("_")[-1].upper(),
+                "SUB_PRODUCT": m["cli"],
+                "CUSTOMER_NAME": str(r["name"]).upper(),
+                "MOBILE_NO": split_phones(r["PhoneNumber"], 0),
+                "MOBILE_NO_2": split_phones(r["PhoneNumber"], 1),
+                "EMAIL": r["applicantPersonalEmail"],
+                "DATE_OF_BIRTH": r["dob"],
+                "TENOR": r["tenure"],
+                "OVD_DAYS": r["max_current_dpd"],
+                "OS_PRINCIPAL": extract_amount(r["pokok_tertunggak_detail"], cli_val),
+                "TOTAL_OUTSTANDING": extract_amount(r["total_outstanding_detail"], cli_val),
+                "BCA_VA": extract_va_multi(r, va_sources, "BCA"),
+                "MANDIRI_VA": extract_va_multi(r, va_sources, "MANDIRI"),
+                "PERMATA_VA": extract_va_multi(r, va_sources, "PERMATA"),
                 **payment_info
-            })
+            }
+
+            rows.append(row)
 
     return pd.DataFrame(rows)
 
 # ==============================
-# 🌐 STREAMLIT UI
+# 🌐 STREAMLIT APP
 # ==============================
 if not st.session_state.login_status:
     login()
 else:
     st.title("📊 Aplikasi Data Cleansing CLI")
-    file = st.file_uploader("Upload Excel", type=["xlsx"])
+
+    file = st.file_uploader("Upload File Excel", type=["xlsx"])
 
     if file and st.button("🚀 Proses Data"):
         df = pd.read_excel(file)
-        st.session_state.result = process_data(df)
-        st.success("Proses selesai")
+        result = process_data(df)
+        st.session_state.result = result
+        st.success("Data berhasil diproses")
 
     if "result" in st.session_state:
         st.dataframe(st.session_state.result)
 
-        out = BytesIO()
-        st.session_state.result.to_excel(out, index=False)
-        out.seek(0)
+        buf = BytesIO()
+        st.session_state.result.to_excel(buf, index=False)
+        buf.seek(0)
 
         st.download_button(
-            "📥 Download",
-            out,
+            "📥 Download Hasil",
+            buf,
             "hasil_final_cli.xlsx",
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
