@@ -25,179 +25,164 @@ def login():
             st.error("Username atau password salah")
 
 def logout():
-    for key in list(st.session_state.keys()):
-        del st.session_state[key]
+    for k in list(st.session_state.keys()):
+        del st.session_state[k]
 
 # ==============================
 # 🧠 HELPER FUNCTIONS
 # ==============================
-def extract_va(text, keyword):
-    if pd.isna(text):
-        return ""
-
-    lines = str(text).split(";")
-    result = []
-
-    for l in lines:
-        if keyword.upper() in l.upper():
-            result.append(l.strip() + ";")
-
-    return "\n".join(result)
-
-def split_phones(phone_str, index):
-    if pd.isna(phone_str):
-        return ""
-    parts = [p.strip() for p in str(phone_str).split(";")]
-    return parts[index] if index < len(parts) else ""
-
-def split_refs(text, index):
+def split_phones(text, idx):
     if pd.isna(text):
         return ""
     parts = [p.strip() for p in str(text).split(";")]
-    return parts[index] if index < len(parts) else ""
+    return parts[idx] if idx < len(parts) else ""
 
-
-def extract_amount(detail_str, cli_code):
-    if pd.isna(detail_str) or pd.isna(cli_code):
+def extract_amount(detail, cli):
+    if pd.isna(detail) or pd.isna(cli):
         return 0
+    m = re.search(rf"{re.escape(cli)}=([\d]+)", str(detail))
+    return int(m.group(1)) if m else 0
 
-    pattern = rf"{re.escape(str(cli_code))}=([\d]+)"
-    match = re.search(pattern, str(detail_str))
-    return int(match.group(1)) if match else 0
-
-def extract_va_multi(row, columns, keyword):
-    result = []
-
-    for col in columns:
-        val = row.get(col)
-        if pd.notna(val):
-            lines = str(val).split(";")
-            for l in lines:
+def extract_va_multi(row, cols, keyword):
+    res = []
+    for c in cols:
+        if pd.notna(row.get(c)):
+            for l in str(row[c]).split(";"):
                 if keyword.upper() in l.upper():
-                    result.append(l.strip() + ";")
+                    res.append(l.strip() + ";")
+    return "\n".join(res)
 
-    return "\n".join(result)
+# ==============================
+# 💰 PAYMENT FUNCTIONS
+# ==============================
+def extract_payments(payment_text):
+    if pd.isna(payment_text) or payment_text.strip() == "":
+        return pd.DataFrame()
 
+    pattern = r"(TRX-[A-Z0-9]+).*?Date ([0-9\-]+), Amount ([0-9]+)"
+    matches = re.findall(pattern, payment_text)
 
+    dfp = pd.DataFrame(matches, columns=["trx", "date", "amount"])
+    if dfp.empty:
+        return dfp
+
+    dfp["date"] = pd.to_datetime(dfp["date"])
+    dfp["amount"] = dfp["amount"].astype(int)
+
+    # trx sama + tanggal sama → dijumlah
+    dfp = dfp.groupby(["trx", "date"], as_index=False)["amount"].sum()
+    dfp = dfp.sort_values("date", ascending=False)
+
+    return dfp.reset_index(drop=True)
+
+def get_last_3_payments(payment_text):
+    dfp = extract_payments(payment_text)
+
+    cols = {
+        "LAST_PAYMENT_DATE": "",
+        "LAST_PAYMENT_AMOUNT": "",
+        "2ND_LAST_PAYMENT_DATE": "",
+        "2ND_LAST_PAYMENT_AMOUNT": "",
+        "3RD_LAST_PAYMENT_DATE": "",
+        "3RD_LAST_PAYMENT_AMOUNT": "",
+    }
+
+    for i in range(min(3, len(dfp))):
+        d = dfp.loc[i, "date"].strftime("%Y-%m-%d")
+        a = f"{dfp.loc[i, 'amount']:,}"
+
+        if i == 0:
+            cols["LAST_PAYMENT_DATE"] = d
+            cols["LAST_PAYMENT_AMOUNT"] = a
+        elif i == 1:
+            cols["2ND_LAST_PAYMENT_DATE"] = d
+            cols["2ND_LAST_PAYMENT_AMOUNT"] = a
+        elif i == 2:
+            cols["3RD_LAST_PAYMENT_DATE"] = d
+            cols["3RD_LAST_PAYMENT_AMOUNT"] = a
+
+    return cols
+
+def payment_column_from_subproduct(sub_product):
+    s = sub_product.lower()
+    if "indodana" in s:
+        return "payments_history_cli_indodana_2"
+    if "blibli" in s:
+        return "payments_history_cli_blibli_3"
+    if "tiket" in s:
+        return "payments_history_cli_tiket_4"
+    return None
+
+# ==============================
+# 🚀 MAIN PROCESS
+# ==============================
 def process_data(df):
 
     cli_map = [
-        {"cli_col": "CLI_indodana_2_contain_adt", "product_col": "product_CLI_indodana_2_adt"},
-        {"cli_col": "CLI_blibli_3_contain_adt", "product_col": "product_CLI_blibli_3_adt"},
-        {"cli_col": "CLI_tiket_4_contain_adt", "product_col": "product_CLI_tiket_4_adt"},
-        {"cli_col": "CLI_indodana_2_contain_imf", "product_col": "product_CLI_indodana_2_imf"},
-        {"cli_col": "CLI_blibli_3_contain_imf", "product_col": "product_CLI_blibli_3_imf"},
-        {"cli_col": "CLI_tiket_4_contain_imf", "product_col": "product_CLI_tiket_4_imf"},
+        ("CLI_indodana_2_contain_adt", "ADT"),
+        ("CLI_blibli_3_contain_adt", "ADT"),
+        ("CLI_tiket_4_contain_adt", "ADT"),
+        ("CLI_indodana_2_contain_imf", "IMF"),
+        ("CLI_blibli_3_contain_imf", "IMF"),
+        ("CLI_tiket_4_contain_imf", "IMF"),
     ]
 
-    va_sources = [
-    "va_number_adt_indodana",
-    "va_number_adt_blibli",
-    "va_number_adt_tiket",
-    "va_number_imf_indodana",
-    "va_number_imf_blibli",
-    "va_number_imf_tiket",
+    va_cols = [
+        "va_number_adt_indodana","va_number_adt_blibli","va_number_adt_tiket",
+        "va_number_imf_indodana","va_number_imf_blibli","va_number_imf_tiket"
     ]
 
     rows = []
 
     for _, r in df.iterrows():
-        for m in cli_map:
-            cli_val = r.get(m["cli_col"])
-            product_val = r.get(m["product_col"])
+        for cli_col, prod in cli_map:
+            cli = r.get(cli_col)
+            if pd.isna(cli) or str(cli).strip() == "":
+                continue
 
-            if pd.notna(cli_val) and str(cli_val).strip() != "":
+            pay_col = payment_column_from_subproduct(cli_col)
+            payment_info = get_last_3_payments(r.get(pay_col, ""))
 
-                new_row = {
-                    "CLIENT_NAME": "INDODANA MULTI FINANCE",
-                    "CLIENT_CODE": "CLI00057",
-                    "ASSIGNMENT_DATE": r["start_date"],
-                    "ASSIGNED_TO": None,
-                    "BATCH": r["batch_import"],
-                    "CUSTOMER_ID": cli_val,
-                    "ADDRESS": None,
-                    "AGREEMENT_NO": r["orderId_DC"],
-                    "CITY": None,
-                    "CUSTOMER_NAME": str(r["name"]).upper(),
-                    "PROVINCE": None, 
-                    "GENDER": r["applicantGender"],
-                    "MOBILE_NO": str(split_phones(r["PhoneNumber"], 0)).lstrip("0"),
-                    "DATE_OF_BIRTH": r["dob"],
-                    "MOBILE_NO_2": str(split_phones(r["PhoneNumber"], 1)).lstrip("0"),
-                    "EMAIL": r["applicantPersonalEmail"],
-                    "PRODUCT": m["cli_col"].split("_")[-1].upper(),
-                    "TENOR": r["tenure"],
-                    "SUB_PRODUCT": m["cli_col"],
-                    "RENTAL": r["angsuran_per_bulan"],
-                    "DISBURSE_DATE": None, 
-                    "OVD_DAYS": r["max_current_dpd"],
-                    "LOAN_AMOUNT": extract_amount(r["total_hutang_detail"], cli_val),
-                    "BUCKET": None,
-                    "DUEDATE": r["tgl_jatuh_tempo"],
-                    "AMOUNT_OVERDUE": None,
-                    "OS_PRINCIPAL": extract_amount(r["pokok_tertunggak_detail"], cli_val),
-                    "LAST_PAYMENT_DATE": None,
-                    "OS_INTEREST": None,
-                    "LAST_PAYMENT_AMOUNT": None,
-                    "OS_CHARGES": extract_amount(r["latefee_detail"], cli_val),
-                    "PAID_OFF_WITH_DISCOUNT": None,
-                    "TOTAL_OUTSTANDING": extract_amount(r["total_outstanding_detail"], cli_val),
-                    "FLAG_DISCOUNT": None,
-                    "BCA_VA": extract_va_multi(r, va_sources, "BCA"),
-                    "INDOMARET": None,
-                    "MANDIRI_VA": extract_va_multi(r, va_sources, "MANDIRI"),
-                    "ALFAMART": None,
-                    "BRI_VA": None,
-                    "PERMATA_VA":extract_va_multi(r, va_sources, "PERMATA"),
-                    "COMPANY_NAME":r["current_company_name"],
-                    "ADDRESS_COMPANY": None, 
-                    "POSITION": r["jobTitle"],
-                    "OFFICE_PHONE_NO": r["currentCompanyPhoneNumber"],
-                    "EMERGENCY_NAME_1": r["mothername"],
-                    "EMERGENCY_NAME_2": split_refs(r["referenceFullName"], 0),
-                    "EMERGENCY_RELATIONSHIP_1": "Ibu Kandung",
-                    "EMERGENCY_RELATIONSHIP_2": split_refs(r["referenceRelationship"], 0),
-                    "EMERGENCY_PHONE_NO_1": None,
-                    "EMERGENCY_PHONE_NO_2": r["referenceMobilePhoneNumber"],
-                    "EMERGENCY_ADDRESS_1": None,
-                    "EMERGENCY_ADDRESS_2": None,
-                    "REMARKS 1": None,
-                    "REMARKS 2": None,
-                    "REMARKS 3": None,
-                    "COLLATERAL_DESCRIPTION": product_val,
-                    "CERTIFICATE_NO / POLICE_NO": None,
-                    "AGENT": None,
-                }
-
-                rows.append(new_row)
+            rows.append({
+                "CUSTOMER_ID": cli,
+                "AGREEMENT_NO": r["orderId_DC"],
+                "PRODUCT": prod,
+                "SUB_PRODUCT": cli_col,
+                "LOAN_AMOUNT": extract_amount(r["total_hutang_detail"], cli),
+                "OS_PRINCIPAL": extract_amount(r["pokok_tertunggak_detail"], cli),
+                "OS_CHARGES": extract_amount(r["latefee_detail"], cli),
+                "TOTAL_OUTSTANDING": extract_amount(r["total_outstanding_detail"], cli),
+                "BCA_VA": extract_va_multi(r, va_cols, "BCA"),
+                "MANDIRI_VA": extract_va_multi(r, va_cols, "MANDIRI"),
+                **payment_info
+            })
 
     return pd.DataFrame(rows)
 
 # ==============================
-# 🌐 MAIN APP
+# 🌐 STREAMLIT UI
 # ==============================
 if not st.session_state.login_status:
     login()
 else:
     st.title("📊 Aplikasi Data Cleansing CLI")
-    uploaded_file = st.file_uploader("Upload File Excel", type=["xlsx"])
+    file = st.file_uploader("Upload Excel", type=["xlsx"])
 
-    if uploaded_file and st.button("🚀 Proses Data"):
-        df = pd.read_excel(uploaded_file)
-        result_df = process_data(df)
-        st.session_state.result = result_df
-        st.success("Data berhasil diproses!")
+    if file and st.button("🚀 Proses Data"):
+        df = pd.read_excel(file)
+        st.session_state.result = process_data(df)
+        st.success("Proses selesai")
 
     if "result" in st.session_state:
         st.dataframe(st.session_state.result)
 
-        output = BytesIO()
-        st.session_state.result.to_excel(output, index=False)
-        output.seek(0)
+        out = BytesIO()
+        st.session_state.result.to_excel(out, index=False)
+        out.seek(0)
 
         st.download_button(
-            "📥 Download Hasil Cleansing",
-            output,
+            "📥 Download",
+            out,
             "hasil_final_cli.xlsx",
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
