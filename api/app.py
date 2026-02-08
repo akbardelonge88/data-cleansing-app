@@ -78,9 +78,6 @@ def extract_payments(payment_text):
         return pd.DataFrame()
 
     dfp = pd.DataFrame(rows, columns=["trx", "date", "amount"])
-
-    # ⚠️ RULE:
-    # hanya dijumlahkan kalau TRX & DATE sama
     dfp = dfp.groupby(["trx", "date"], as_index=False)["amount"].sum()
     dfp = dfp.sort_values("date", ascending=False).reset_index(drop=True)
     return dfp
@@ -150,6 +147,9 @@ def process_data(df):
             if pd.isna(cli_val) or str(cli_val).strip() == "":
                 continue
 
+            # ✅ FIX DI SINI
+            product_val = r.get(m["prod"])
+
             pay_col = payment_col_from_subproduct(m["cli"])
             payment_info = get_last_3_payments(r.get(pay_col)) if pay_col else {}
 
@@ -193,8 +193,8 @@ def process_data(df):
                 "MANDIRI_VA": extract_va_multi(r, va_sources, "MANDIRI"),
                 "ALFAMART": None,
                 "BRI_VA": None,
-                "PERMATA_VA":extract_va_multi(r, va_sources, "PERMATA"),
-                "COMPANY_NAME":r["current_company_name"],
+                "PERMATA_VA": extract_va_multi(r, va_sources, "PERMATA"),
+                "COMPANY_NAME": r["current_company_name"],
                 "ADDRESS_COMPANY": None, 
                 "POSITION": r["jobTitle"],
                 "OFFICE_PHONE_NO": r["currentCompanyPhoneNumber"],
