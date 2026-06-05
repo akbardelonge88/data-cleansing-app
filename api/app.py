@@ -25,9 +25,7 @@ def login():
             st.error("Username atau password salah")
 
 def logout():
-    for k in list(st.session_state.keys()):
-        del st.session_state[k]
-    st.rerun()
+    st.session_state.clear()
 
 # ==============================
 # 🧠 HELPER FUNCTIONS
