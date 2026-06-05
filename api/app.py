@@ -236,47 +236,79 @@ def process_data(df):
 # ==============================
 if not st.session_state.login_status:
     login()
+
 else:
     st.title("📊 Aplikasi Data Cleansing CLI")
 
-    file = st.file_uploader("Upload File Excel", type=["xlsx"])
+    file = st.file_uploader(
+        "Upload File Excel",
+        type=["xlsx"]
+    )
 
     if file and st.button("🚀 Proses Data"):
-        df = pd.read_excel(file)
-        result = process_data(df)
 
-        # fix pyarrow overflow
-        result = result.astype(object)
-        result = result.fillna("")
+        try:
+            df = pd.read_excel(file)
 
-        for c in result.columns:
-            result[c] = result[c].astype(str)
+            result = process_data(df)
 
-        st.session_state.result = result
-        st.success("Data berhasil diproses")
+            # ==========================
+            # Fix PyArrow Overflow
+            # ==========================
+            result = result.fillna("")
 
+            for col in result.columns:
+                try:
+                    result[col] = result[col].astype(str)
+                except Exception:
+                    pass
+
+            st.session_state.result = result
+
+            st.success("✅ Data berhasil diproses")
+
+        except Exception as e:
+            st.error(f"❌ Error saat proses data: {e}")
+
+    # ==========================
+    # Display Result
+    # ==========================
     if "result" in st.session_state:
-    display_df = st.session_state.result.copy()
 
-    # convert datetime supaya aman buat Arrow
-    for col in display_df.columns:
-        if pd.api.types.is_datetime64_any_dtype(display_df[col]):
-            display_df[col] = display_df[col].astype(str)
+        display_df = st.session_state.result.copy()
 
-    st.dataframe(display_df)
+        st.dataframe(
+            display_df,
+            use_container_width=True
+        )
 
+        # ==========================
+        # Export Excel
+        # ==========================
         buf = BytesIO()
-        st.session_state.result.to_excel(buf, index=False)
+
+        with pd.ExcelWriter(
+            buf,
+            engine="openpyxl"
+        ) as writer:
+            st.session_state.result.to_excel(
+                writer,
+                index=False
+            )
+
         buf.seek(0)
 
         st.download_button(
-            "📥 Download Hasil",
-            buf,
-            "hasil_final_cli.xlsx",
-            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            label="📥 Download Hasil",
+            data=buf,
+            file_name="hasil_final_cli.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
 
-    st.button("Logout", on_click=logout)
+    st.button(
+        "Logout",
+        on_click=logout
+    )
 
 st.markdown("---")
 st.markdown("© 2026 - Muhamad Akbar")
