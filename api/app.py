@@ -47,8 +47,15 @@ def split_refs(text, idx):
 def extract_amount(detail, cli):
     if pd.isna(detail) or pd.isna(cli):
         return 0
-    m = re.search(rf"{re.escape(str(cli))}=([\d]+)", str(detail))
-    return int(m.group(1)) if m else 0
+
+    try:
+        m = re.search(
+            rf"{re.escape(str(cli))}=([\d]+)",
+            str(detail)
+        )
+        return float(m.group(1)) if m else 0
+    except:
+        return 0
 
 def extract_va_multi(row, cols, keyword):
     res = []
@@ -72,7 +79,11 @@ def extract_payments(payment_text):
 
     rows = []
     for trx, date, amt in matches:
-        rows.append([trx, pd.to_datetime(date), int(amt)])
+        rows.append([
+            trx,
+            pd.to_datetime(date, errors="coerce"),
+            int(amt)
+        ])
 
     if not rows:
         return pd.DataFrame()
@@ -80,6 +91,7 @@ def extract_payments(payment_text):
     dfp = pd.DataFrame(rows, columns=["trx", "date", "amount"])
     dfp = dfp.groupby(["trx", "date"], as_index=False)["amount"].sum()
     dfp = dfp.sort_values("date", ascending=False).reset_index(drop=True)
+
     return dfp
 
 def get_last_3_payments(payment_text):
@@ -232,11 +244,26 @@ else:
     if file and st.button("🚀 Proses Data"):
         df = pd.read_excel(file)
         result = process_data(df)
+
+        # fix pyarrow overflow
+        result = result.astype(object)
+        result = result.fillna("")
+
+        for c in result.columns:
+            result[c] = result[c].astype(str)
+
         st.session_state.result = result
         st.success("Data berhasil diproses")
 
     if "result" in st.session_state:
-        st.dataframe(st.session_state.result)
+    display_df = st.session_state.result.copy()
+
+    # convert datetime supaya aman buat Arrow
+    for col in display_df.columns:
+        if pd.api.types.is_datetime64_any_dtype(display_df[col]):
+            display_df[col] = display_df[col].astype(str)
+
+    st.dataframe(display_df)
 
         buf = BytesIO()
         st.session_state.result.to_excel(buf, index=False)
