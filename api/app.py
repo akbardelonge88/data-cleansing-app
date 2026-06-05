@@ -136,13 +136,53 @@ def payment_col_from_subproduct(sub_product):
 def process_data(df):
 
     cli_map = [
-        {"cli": "CLI_indodana_2_contain_adt", "prod": "product_CLI_indodana_2_adt"},
-        {"cli": "CLI_blibli_3_contain_adt", "prod": "product_CLI_blibli_3_adt"},
-        {"cli": "CLI_tiket_4_contain_adt", "prod": "product_CLI_tiket_4_adt"},
-        {"cli": "CLI_indodana_2_contain_imf", "prod": "product_CLI_indodana_2_imf"},
-        {"cli": "CLI_blibli_3_contain_imf", "prod": "product_CLI_blibli_3_imf"},
-        {"cli": "CLI_tiket_4_contain_imf", "prod": "product_CLI_tiket_4_imf"},
-    ]
+    # ==========================
+    # ATH
+    # ==========================
+    {
+        "cli": "ATH_indodana_1",
+        "prod": "product_ATH_indodana_1",
+        "tenor": "ath_tenure"
+    },
+
+    # ==========================
+    # CLI ADT
+    # ==========================
+    {
+        "cli": "CLI_indodana_2_contain_adt",
+        "prod": "product_CLI_indodana_2_adt",
+        "tenor": "tenure"
+    },
+    {
+        "cli": "CLI_blibli_3_contain_adt",
+        "prod": "product_CLI_blibli_3_adt",
+        "tenor": "tenure"
+    },
+    {
+        "cli": "CLI_tiket_4_contain_adt",
+        "prod": "product_CLI_tiket_4_adt",
+        "tenor": "tenure"
+    },
+
+    # ==========================
+    # CLI IMF
+    # ==========================
+    {
+        "cli": "CLI_indodana_2_contain_imf",
+        "prod": "product_CLI_indodana_2_imf",
+        "tenor": "tenure"
+    },
+    {
+        "cli": "CLI_blibli_3_contain_imf",
+        "prod": "product_CLI_blibli_3_imf",
+        "tenor": "tenure"
+    },
+    {
+        "cli": "CLI_tiket_4_contain_imf",
+        "prod": "product_CLI_tiket_4_imf",
+        "tenor": "tenure"
+    },
+]
 
     va_sources = [
         "va_number_adt_indodana","va_number_adt_blibli","va_number_adt_tiket",
@@ -159,6 +199,7 @@ def process_data(df):
 
             # ✅ FIX DI SINI
             product_val = r.get(m["prod"])
+            tenor_val = r.get(m["tenor"], r.get("tenure"))
 
             pay_col = payment_col_from_subproduct(m["cli"])
             payment_info = get_last_3_payments(r.get(pay_col)) if pay_col else {}
@@ -181,7 +222,7 @@ def process_data(df):
                 "MOBILE_NO_2": str(split_phones(r["PhoneNumber"], 1)).lstrip("0"),
                 "EMAIL": r["applicantPersonalEmail"],
                 "PRODUCT": m["cli"].split("_")[-1].upper(),
-                "TENOR": r["tenure"],
+                "TENOR": tenor_val,
                 "SUB_PRODUCT": m["cli"],
                 "RENTAL": r["angsuran_per_bulan"],
                 "DISBURSE_DATE": None, 
